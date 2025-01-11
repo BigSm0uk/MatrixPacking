@@ -72,7 +72,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         }
     }
 
-    private static void AddGraphToExcel(XLWorkbook workbook, Dictionary<string, List<string>> graph)
+    private static void AddGraphToExcel(XLWorkbook workbook, IDictionary<string, List<string>> graph)
     {
         // Создаем новый лист в Excel
         var worksheet = workbook.AddWorksheet("Исходные данные");
@@ -104,24 +104,28 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
     }
 
 
-    private static Dictionary<string, List<string>> ParseNodesData(IXLWorksheet worksheet)
+    private static OrderedDictionary<string, List<string>> ParseNodesData(IXLWorksheet worksheet)
     {
-        Dictionary<string, List<string>> result = [];
+        var result = new OrderedDictionary<string, List<string>>();
         var rows = worksheet.RowsUsed().Count();
+
         for (var row = 1; row <= rows; row++)
         {
             var from = worksheet.Cell(row, 1).Value.ToString();
             var to = worksheet.Cell(row, 2).Value.ToString();
+
             if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) break;
+
             if (result.TryGetValue(from, out var valueFrom)) valueFrom.Add(to);
-            // if (result.TryGetValue(to, out var valueTo)) valueTo.Add(from);
-            if (!result.ContainsKey(from)) result[from] = [to];
+
+            else result[from] = [to];
         }
 
         return result;
     }
 
-    private static int[,] CreateAdjacencyMatrix(Dictionary<string, List<string>> graph)
+
+    private static int[,] CreateAdjacencyMatrix(IDictionary<string, List<string>> graph)
     {
         // 1. Собираем список всех узлов
         var nodes = graph.Keys.Union(graph.Values.SelectMany(v => v)).Distinct().ToList();

@@ -23,7 +23,7 @@ public class MatrixPackingController(ILogger<MatrixPackingController> logger, Ma
         {
             using var stream = file.OpenReadStream();
             return File(matrixPackingService.ReadAndCalculate(stream),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "result.xlsx");
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Результаты.xlsx");
         }
         catch (Exception ex)
         {
