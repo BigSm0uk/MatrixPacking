@@ -1,5 +1,4 @@
 ﻿using System.Data;
-using System.Net.NetworkInformation;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Logging;
 
@@ -17,15 +16,16 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
             throw new DataException("Не удалось получить первый лист");
         }
 
-        var nodes = ParseNodesData(worksheet);
+        var (nodes, bandWidth) = ParseNodesData(worksheet);
         var adjacencyMatrix = CreateAdjacencyMatrix(nodes);
-        var (values, pointers) = PackMatrixSchemeCustom(adjacencyMatrix);
+        var (values, pointers) = PackMatrixSchemeCustom(adjacencyMatrix, bandWidth);
 
         var wb = new XLWorkbook();
 
         AddGraphToExcel(wb, nodes);
-        AddMatrixToExcel(wb, adjacencyMatrix);
+        AddMatrixToExcel(wb, adjacencyMatrix, bandWidth);
         AddPackingMatrixToExcel(wb, values, pointers);
+        
         using var wbStream = new MemoryStream();
         wb.SaveAs(wbStream);
 
@@ -54,7 +54,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
     }
 
 
-    private static void AddMatrixToExcel(XLWorkbook wb, int[,] matrix)
+    private static void AddMatrixToExcel(XLWorkbook wb, int[,] matrix, int bandWidth)
     {
         var ws = wb.AddWorksheet("Матрица смежности");
 
@@ -66,11 +66,31 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         {
             for (var j = 0; j < cols; j++)
             {
-                // Заполняем ячейку 
-                ws.Cell(i + 1, j + 1).SetValue(matrix[i, j]);
+                // Заполняем ячейку значением из матрицы
+                var cell = ws.Cell(i + 1, j + 1);
+                cell.SetValue(matrix[i, j]);
+
+                // Установка стиля фона для диагональных элементов
+                if (i == j)
+                {
+                    cell.Style.Fill.BackgroundColor = XLColor.LightBlue;
+                }
+                // Установка стиля фона для элементов за пределами ширины ленты
+                else if (Math.Abs(i - j) > bandWidth)
+                {
+                    cell.Style.Fill.BackgroundColor = XLColor.DarkGreen;
+                }
+
+                // Установка стиля фона для всех ненулевых элементов
+                if (matrix[i, j] != 0)
+                {
+                    cell.Style.Fill.BackgroundColor = XLColor.Red;
+                }
             }
         }
     }
+
+
 
     private static void AddGraphToExcel(XLWorkbook workbook, IDictionary<string, List<string>> graph)
     {
@@ -91,6 +111,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         var row = 2; // Начинаем с 2-й строки
         foreach (var node in graph)
         {
+            if(node.Value.Count==0) continue;
             worksheet.Cell(row, 1).Value = node.Key; // Имя узла
 
             var col = 2;
@@ -104,10 +125,22 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
     }
 
 
-    private static OrderedDictionary<string, List<string>> ParseNodesData(IXLWorksheet worksheet)
+    private static (OrderedDictionary<string, List<string>>, int) ParseNodesData(IXLWorksheet worksheet)
     {
         var result = new OrderedDictionary<string, List<string>>();
         var rows = worksheet.RowsUsed().Count();
+        // Сопоставляем имена с индексами (ключи — строки/столбцы матрицы)
+        var maxBandWidth = 0;
+        for (var row = 1; row <= rows; row++)
+        {
+            var node = worksheet.Cell(row, 6).Value.ToString();
+            if (string.IsNullOrWhiteSpace(node)) break;
+            result.Add(node, []);
+        }
+
+        var keys = result.Keys
+            .Select((node, index) => new { node, index })
+            .ToDictionary(x => x.node, x => x.index);
 
         for (var row = 1; row <= rows; row++)
         {
@@ -119,9 +152,13 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
             if (result.TryGetValue(from, out var valueFrom)) valueFrom.Add(to);
 
             else result[from] = [to];
-        }
 
-        return result;
+            // Вычисляем ширину ленты (разница индексов)
+            var bandWidth = Math.Abs(keys[from] - keys[to]);
+            maxBandWidth = Math.Max(maxBandWidth, bandWidth);
+        }
+        
+        return (result, maxBandWidth);
     }
 
 
@@ -154,7 +191,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         return adjacencyMatrix;
     }
 
-    private static (int[] Values, int[] Pointers) PackMatrixSchemeCustom(int[,] adjacencyMatrix)
+    private static (int[] Values, int[] Pointers) PackMatrixSchemeCustom(int[,] adjacencyMatrix, int bandWidth)
     {
         var size = adjacencyMatrix.GetLength(0); // Размер матрицы
         var values = new List<int>(); // Первый массив: элементы матрицы
@@ -162,11 +199,10 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
 
         for (var i = 0; i < size; i++)
         {
-            // Сохраняем строку полностью от первого ненулевого элемента до диагонального
-            var startColumn = 0; // Начинаем с первого элемента строки
-            var endColumn = i; // Диагональный элемент находится в столбце i
+            // Ограничиваем диапазон столбцов шириной ленты
+            var startColumn = Math.Max(0, i - bandWidth); // Начало - максимум между 0 и (i - ширина ленты)
 
-            for (var j = startColumn; j <= endColumn; j++)
+            for (var j = startColumn; j <= i; j++)
             {
                 values.Add(adjacencyMatrix[i, j]); // Добавляем элемент в Values
             }
@@ -177,4 +213,5 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
 
         return (values.ToArray(), pointers);
     }
+
 }
