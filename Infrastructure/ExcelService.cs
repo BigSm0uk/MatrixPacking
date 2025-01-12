@@ -18,13 +18,15 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
 
         var (nodes, bandWidth) = ParseNodesData(worksheet);
         var adjacencyMatrix = CreateAdjacencyMatrix(nodes);
-        var (values, pointers) = PackMatrixSchemeCustom(adjacencyMatrix, bandWidth);
+        var (values, pointers) = PackMatrixScheme4(adjacencyMatrix, bandWidth);
+        var unPackedMatrix = UnPackMatrixScheme4(values, pointers, bandWidth);
 
         var wb = new XLWorkbook();
 
         AddGraphToExcel(wb, nodes);
         AddMatrixToExcel(wb, adjacencyMatrix, bandWidth);
         AddPackingMatrixToExcel(wb, values, pointers);
+        AddMatrixToExcel(wb, unPackedMatrix, bandWidth, "Распакованная матрица");
         
         using var wbStream = new MemoryStream();
         wb.SaveAs(wbStream);
@@ -54,9 +56,9 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
     }
 
 
-    private static void AddMatrixToExcel(XLWorkbook wb, int[,] matrix, int bandWidth)
+    private static void AddMatrixToExcel(XLWorkbook wb, int[,] matrix, int bandWidth,string sheetName = "Матрица смежности")
     {
-        var ws = wb.AddWorksheet("Матрица смежности");
+        var ws = wb.AddWorksheet(sheetName);
 
         var rows = matrix.GetLength(0); // Количество строк в матрице
         var cols = matrix.GetLength(1); // Количество столбцов в матрице
@@ -124,7 +126,6 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         }
     }
 
-
     private static (OrderedDictionary<string, List<string>>, int) ParseNodesData(IXLWorksheet worksheet)
     {
         var result = new OrderedDictionary<string, List<string>>();
@@ -191,7 +192,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         return adjacencyMatrix;
     }
 
-    private static (int[] Values, int[] Pointers) PackMatrixSchemeCustom(int[,] adjacencyMatrix, int bandWidth)
+    private static (int[] Values, int[] Pointers) PackMatrixScheme4(int[,] adjacencyMatrix, int bandWidth)
     {
         var size = adjacencyMatrix.GetLength(0); // Размер матрицы
         var values = new List<int>(); // Первый массив: элементы матрицы
@@ -213,5 +214,30 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
 
         return (values.ToArray(), pointers);
     }
+
+    private static int[,] UnPackMatrixScheme4(int[] values, int[] pointers, int bandWidth)
+    {
+        var size = pointers.Length; // Размер матрицы (по числу диагональных элементов)
+        var adjacencyMatrix = new int[size, size]; // Инициализация пустой матрицы
+
+        var valueIndex = 0; // Текущий индекс в массиве values
+
+        for (var i = 0; i < size; i++)
+        {
+            // Определяем диапазон столбцов, которые входят в ширину ленты
+            var startColumn = Math.Max(0, i - bandWidth); // Левый край ленты
+
+            for (var j = startColumn; j <= i; j++)
+            {
+                // Заполняем элемент из values
+                var value = values[valueIndex++];
+                adjacencyMatrix[i, j] = value;
+                adjacencyMatrix[j, i] = value;
+            }
+        }
+
+        return adjacencyMatrix;
+    }
+
 
 }
