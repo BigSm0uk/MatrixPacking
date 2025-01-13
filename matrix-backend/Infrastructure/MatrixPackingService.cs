@@ -104,7 +104,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         worksheet.Cell(1, 2).Value = "Связи"; // Мы будем объединять все связи в одну колонку
 
         // Находим максимальное количество соседей
-        var maxNeighbors = graph.Values.Max(neighbors => neighbors.Count);
+        var maxNeighbors = graph.Values.Max(neighbors => neighbors.Count) + 1;
         worksheet.Range(1, 2, 1, maxNeighbors).Merge();
         worksheet.Range(1, 2, 1, maxNeighbors).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         worksheet.Range(1, 2, 1, maxNeighbors).Style.Border.SetOutsideBorder(XLBorderStyleValues.Thick);
@@ -183,12 +183,11 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
             foreach (var toNode in neighbors)
             {
                 if (!nodeIndex.TryGetValue(toNode, out var toIndex)) continue;
-                // Устанавливаем связь в обе стороны для неориентированного графа
+                // Устанавливаем связь в обе стороны для графа
                 adjacencyMatrix[fromIndex, toIndex] = 1;
                 adjacencyMatrix[toIndex, fromIndex] = 1;
             }
         }
-
         return adjacencyMatrix;
     }
 
