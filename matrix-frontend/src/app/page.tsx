@@ -1,8 +1,11 @@
 'use client'
-import React, {useState} from "react";
+import React from "react";
 import {Controller, useForm} from "react-hook-form";
+import {createCompletedRoot} from "@/app/Shared/Helpers/FetchHelper";
+import {useRouter} from "next/navigation";
 
 export default function Home() {
+    const router = useRouter()
     const {control, watch, handleSubmit} = useForm({
         defaultValues: {
             useTestFile: false,
@@ -15,9 +18,9 @@ export default function Home() {
         if (data.useTestFile) {
             // Загружаем файл из папки public
             try {
-                const response = await fetch("/test-file.xlsx"); // Укажите путь к вашему тестовому файлу
+                const response = await fetch("/Данные_приложение_3.xlsx"); // Укажите путь к вашему тестовому файлу
                 const blob = await response.blob();
-                fileToUpload = new File([blob], "test-file.xlsx", {
+                fileToUpload = new File([blob], "Данные_приложение_3.xlsx", {
                     type: blob.type,
                 });
             } catch (error) {
@@ -34,15 +37,28 @@ export default function Home() {
 
             // Отправка файла на сервер
             try {
-                const response = await fetch("/api/files/upload", {
+                // Отправляем запрос на создание сессии
+                const idResponse = await fetch(createCompletedRoot("/MatrixPacking/CreatePackingSession"), {
                     method: "POST",
                     body: formData,
                 });
 
-                const result = await response.json();
-                alert(`Сессия создана: ${result.sessionId}`);
-            } catch (error) {
-                alert("Ошибка загрузки файла");
+                // Проверяем, успешен ли запрос
+                if (!idResponse.ok) {
+                    alert(`Ошибка при создании сессии: ${idResponse.status} ${idResponse.statusText}`);
+                }
+
+                // Парсим ответ
+                const result = await idResponse.json();
+
+                // Проверяем, есть ли sessionId в ответе
+                if (!result?.sessionId) {
+                    alert("Ответ не содержит sessionId");
+                }
+                router.push(result.sessionId);
+                
+            } catch (error : any) {
+                console.error("Произошла ошибка:", error.message);
             }
         }
     };
@@ -62,7 +78,7 @@ export default function Home() {
                     </p>
                     <p className="mb-6">
                         Пример файла можно скачать
-                        <a className="link link-primary ml-1" href="">
+                        <a className="link link-primary ml-1" href="/Данные_приложение_3.xlsx">
                             по ссылке
                         </a>
                     </p>

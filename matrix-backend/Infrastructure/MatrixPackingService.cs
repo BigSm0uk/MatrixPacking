@@ -1,37 +1,94 @@
-﻿using System.Data;
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
+using Core.Abstractions;
+using Core.Model;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Infrastructure;
 
-public class MatrixPackingService(ILogger<MatrixPackingService> logger)
+public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryCache memoryCache)
 {
-    public byte[] ReadAndCalculate(Stream stream)
+    // public byte[] ReadAndCalculate(Stream stream)
+    // {
+    //     using var workbook = new XLWorkbook(stream);
+    //     var worksheet = workbook.Worksheets.First(); // Берём первый лист
+    //     if (worksheet is null)
+    //     {
+    //         logger.LogError("Не удалось получить первый лист");
+    //         throw new DataException("Не удалось получить первый лист");
+    //     }
+    //
+    //     var (nodes, bandWidth) = ParseNodesData(worksheet);
+    //     var adjacencyMatrix = CreateAdjacencyMatrix(nodes);
+    //     var (values, pointers) = PackMatrixScheme4(adjacencyMatrix, bandWidth);
+    //     var unPackedMatrix = UnPackMatrixScheme4(values, pointers, bandWidth);
+    //
+    //     var wb = new XLWorkbook();
+    //
+    //     AddGraphToExcel(wb, nodes);
+    //     AddMatrixToExcel(wb, adjacencyMatrix, bandWidth);
+    //     AddPackingMatrixToExcel(wb, values, pointers);
+    //     AddMatrixToExcel(wb, unPackedMatrix, bandWidth, "Распакованная матрица");
+    //
+    //     using var wbStream = new MemoryStream();
+    //     wb.SaveAs(wbStream);
+    //
+    //     return wbStream.ToArray();
+    // }
+    public Result<Guid> ReadAndCalculate(Stream stream)
     {
         using var workbook = new XLWorkbook(stream);
-        var worksheet = workbook.Worksheets.First(); // Берём первый лист
-        if (worksheet is null)
+        var worksheet = workbook.Worksheets.FirstOrDefault(); // Берём первый лист
+        if (worksheet == null)
         {
             logger.LogError("Не удалось получить первый лист");
-            throw new DataException("Не удалось получить первый лист");
+            return Result<Guid>.Failure("Не удалось получить первый лист");
         }
 
         var (nodes, bandWidth) = ParseNodesData(worksheet);
         var adjacencyMatrix = CreateAdjacencyMatrix(nodes);
         var (values, pointers) = PackMatrixScheme4(adjacencyMatrix, bandWidth);
-        var unPackedMatrix = UnPackMatrixScheme4(values, pointers, bandWidth);
 
-        var wb = new XLWorkbook();
+        var id = Guid.NewGuid();
 
-        AddGraphToExcel(wb, nodes);
-        AddMatrixToExcel(wb, adjacencyMatrix, bandWidth);
-        AddPackingMatrixToExcel(wb, values, pointers);
-        AddMatrixToExcel(wb, unPackedMatrix, bandWidth, "Распакованная матрица");
-        
+        var packedMatrixResult = new PackedMatrix
+        {
+            Id = id,
+            Pointers = pointers,
+            BandWidth = bandWidth,
+            Values = values,
+            TotalMatrixSize = adjacencyMatrix.Length
+        };
+
+        memoryCache.Set(id.ToString(), packedMatrixResult, new MemoryCacheEntryOptions
+        {
+            SlidingExpiration = TimeSpan.FromMinutes(20) // Время жизни продлевается при каждом обращении
+        }); // Сохраняем в локальный кэш
+
+        return Result<Guid>.Success(id);
+    }
+
+    public Result<PackedMatrix> GetPackedMatrixFromCache(Guid id)
+    {
+        return !memoryCache.TryGetValue(id.ToString(), out PackedMatrix? matrix)
+            ? Result<PackedMatrix>.Failure("Нет сессии с таким id")
+            : Result<PackedMatrix>.Success(matrix!);
+    }
+
+    public Result<byte[]> GetResultMatrixFile(Guid id)
+    {
+        if (!memoryCache.TryGetValue(id.ToString(), out PackedMatrix? matrix))
+            return Result<byte[]>.Failure("Нет сессии с таким id");
+        using var workbook = new XLWorkbook();
+        var unPackedMatrix = UnPackMatrixScheme4(matrix!.Values, matrix.Pointers, matrix.BandWidth);
+
+        AddPackingMatrixToExcel(workbook, matrix.Values, matrix.Pointers);
+        AddMatrixToExcel(workbook, unPackedMatrix, matrix.BandWidth, "Распакованная матрица");
+
         using var wbStream = new MemoryStream();
-        wb.SaveAs(wbStream);
+        workbook.SaveAs(wbStream);
 
-        return wbStream.ToArray();
+        return Result<byte[]>.Success(wbStream.ToArray());
     }
 
     private static void AddPackingMatrixToExcel(XLWorkbook wb, int[] values, int[] pointers)
@@ -56,7 +113,8 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
     }
 
 
-    private static void AddMatrixToExcel(XLWorkbook wb, int[,] matrix, int bandWidth,string sheetName = "Матрица смежности")
+    private static void AddMatrixToExcel(XLWorkbook wb, int[,] matrix, int bandWidth,
+        string sheetName = "Матрица смежности")
     {
         var ws = wb.AddWorksheet(sheetName);
 
@@ -93,7 +151,6 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
     }
 
 
-
     private static void AddGraphToExcel(XLWorkbook workbook, IDictionary<string, List<string>> graph)
     {
         // Создаем новый лист в Excel
@@ -113,7 +170,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
         var row = 2; // Начинаем с 2-й строки
         foreach (var node in graph)
         {
-            if(node.Value.Count==0) continue;
+            if (node.Value.Count == 0) continue;
             worksheet.Cell(row, 1).Value = node.Key; // Имя узла
 
             var col = 2;
@@ -158,7 +215,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
             var bandWidth = Math.Abs(keys[from] - keys[to]);
             maxBandWidth = Math.Max(maxBandWidth, bandWidth);
         }
-        
+
         return (result, maxBandWidth);
     }
 
@@ -188,6 +245,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
                 adjacencyMatrix[toIndex, fromIndex] = 1;
             }
         }
+
         return adjacencyMatrix;
     }
 
@@ -237,6 +295,4 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger)
 
         return adjacencyMatrix;
     }
-
-
 }
