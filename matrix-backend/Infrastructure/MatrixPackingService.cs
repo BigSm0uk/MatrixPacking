@@ -68,6 +68,71 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
         return Result<Guid>.Success(id);
     }
 
+    public Result<bool> ChangeMatrixElementInPackedForm(Guid id, int row, int col, int newValue)
+    {
+        // Получаем упакованную матрицу из кэша
+        var matrixResult = GetPackedMatrixFromCache(id);
+        if (!matrixResult.IsSuccess) return Result<bool>.Failure(matrixResult.Error!);
+        var matrix = matrixResult.Value!;
+
+        // Проверяем корректность входных данных
+        if (row < 0 || row >= matrix.TotalMatrixSize || col < 0 || col >= matrix.TotalMatrixSize)
+            return Result<bool>.Failure("Индекс i или j вышел за границы матрицы");
+
+        // Проверяем, находится ли элемент в пределах ширины ленты
+        if (col > row || row - col > matrix.BandWidth)
+        {
+            // Элемент за пределами ширины ленты, пересчитываем матрицу
+            var newBandWidth = Math.Max(matrix.BandWidth, Math.Abs(row - col));
+            var adjacencyMatrix = UnPackMatrixScheme4(matrix.Values, matrix.Pointers, matrix.BandWidth);
+
+            // Обновляем значение в распакованной матрице
+            adjacencyMatrix[row, col] = newValue;
+            adjacencyMatrix[col, row] = newValue; // Для симметричной матрицы
+
+            // Перепаковываем матрицу с новой шириной ленты
+            var newPackedMatrix = PackMatrixScheme4(adjacencyMatrix, newBandWidth);
+
+            // Сохраняем новую матрицу в кэш
+            var updatedMatrix = new PackedMatrix
+            {
+                Id = matrix.Id,
+                Values = newPackedMatrix.Values,
+                Pointers = newPackedMatrix.Pointers,
+                TotalMatrixSize = matrix.TotalMatrixSize,
+                BandWidth = newBandWidth
+            };
+            CreateOrUpdatePackedMatrixInCache(id, updatedMatrix);
+
+            return Result<bool>.Success(true);
+        }
+
+        // Элемент внутри ширины ленты, обновляем значение
+        var startColumn = Math.Max(0, row - matrix.BandWidth);
+        var offset = col - startColumn; // Смещение столбца от начала текущей строки в ленте
+        var valueIndex = (row == 0) ? 0 : matrix.Pointers[row - 1] + 1 + offset;
+
+        if (valueIndex < 0 || valueIndex >= matrix.Values.Length)
+            return Result<bool>.Failure("Invalid index calculated for the packed matrix.");
+
+        // Изменяем значение в массиве Values
+        matrix.Values[valueIndex] = newValue;
+
+        // Обновляем кэш
+        CreateOrUpdatePackedMatrixInCache(id, matrix);
+
+        return Result<bool>.Success(true);
+    }
+
+    private void CreateOrUpdatePackedMatrixInCache(Guid id, PackedMatrix updatedMatrix)
+    {
+        memoryCache.Set(id.ToString(), updatedMatrix, new MemoryCacheEntryOptions
+        {
+            SlidingExpiration = TimeSpan.FromMinutes(20) // Время жизни продлевается при каждом обращении
+        }); // Сохраняем в локальный кэш
+    }
+
+
     public Result<PackedMatrix> GetPackedMatrixFromCache(Guid id)
     {
         return !memoryCache.TryGetValue(id.ToString(), out PackedMatrix? matrix)
@@ -79,6 +144,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
     {
         if (!memoryCache.TryGetValue(id.ToString(), out PackedMatrix? matrix))
             return Result<byte[]>.Failure("Нет сессии с таким id");
+
         using var workbook = new XLWorkbook();
         var unPackedMatrix = UnPackMatrixScheme4(matrix!.Values, matrix.Pointers, matrix.BandWidth);
 
@@ -86,10 +152,17 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
         AddMatrixToExcel(workbook, unPackedMatrix, matrix.BandWidth, "Распакованная матрица");
 
         using var wbStream = new MemoryStream();
+    
+        // Убедитесь, что сохраняете в формат Excel
         workbook.SaveAs(wbStream);
+    
+        // Перемещаем позицию потока в начало перед тем, как читать его
+        wbStream.Seek(0, SeekOrigin.Begin);
 
-        return Result<byte[]>.Success(wbStream.ToArray());
+        // Проверка, не пуст ли поток (если не пуст, возвращаем файл)
+        return wbStream.Length == 0 ? Result<byte[]>.Failure("Не удалось создать файл Excel.") : Result<byte[]>.Success(wbStream.ToArray());
     }
+
 
     private static void AddPackingMatrixToExcel(XLWorkbook wb, int[] values, int[] pointers)
     {

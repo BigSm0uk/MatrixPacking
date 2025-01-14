@@ -30,13 +30,23 @@ public class MatrixPackingController(ILogger<MatrixPackingController> logger, Ma
         }
     }
 
-    [HttpGet]
+    [HttpPost("{id:guid}")]
+    public IActionResult ChangeMatrixElementInPackedForm(Guid id, int row, int col, int newValue)
+    {
+        var result = matrixPackingService.ChangeMatrixElementInPackedForm(id, row, col, newValue);
+        if (result.IsSuccess)
+            return Ok();
+        return BadRequest(result.Error!);
+    }
+
+    [HttpGet("{id:guid}")]
     public IActionResult GetResultMatrix(Guid id)
     {
         var result = matrixPackingService.GetPackedMatrixFromCache(id);
-        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error); 
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
     }
-    [HttpGet]
+
+    [HttpGet("{id:guid}")]
     public IActionResult GetResultMatrixFile(Guid id)
     {
         var result = matrixPackingService.GetResultMatrixFile(id);

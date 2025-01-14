@@ -20,8 +20,7 @@ export default function ClientMatrix({ title, data }: { title: string; data: num
                 </button>
             </div>
             <div
-                className="p-2 bg-base-100 rounded border border-base-300 text-sm overflow-auto"
-                style={{ maxHeight: '300px' }}
+                className="p-2 bg-base-100 max-h-[300px] rounded border border-base-300 text-sm overflow-auto"
             >
                 {data.join(', ')}
             </div>
