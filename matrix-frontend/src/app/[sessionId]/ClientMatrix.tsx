@@ -7,7 +7,6 @@ export default function ClientMatrix({ title, data }: { title: string; data: num
     const handleCopy = () => {
         const textToCopy = data.join(', ');
         navigator.clipboard.writeText(textToCopy).then(() => {
-            alert(`${title} скопированы в буфер обмена!`);
         });
     };
 

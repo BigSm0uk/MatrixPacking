@@ -4,7 +4,7 @@ namespace Core.Model;
 
 public class PackedMatrix : BaseEntity
 {
-    public int[] Values { get; init; } = [];
+    public double[] Values { get; init; } = [];
     public int[] Pointers { get; init; } = [];
     public int PackedSize => Values.Length + Pointers.Length;
     public int TotalMatrixSize { get; init; }

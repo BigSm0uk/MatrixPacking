@@ -8,33 +8,6 @@ namespace Infrastructure;
 
 public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryCache memoryCache)
 {
-    // public byte[] ReadAndCalculate(Stream stream)
-    // {
-    //     using var workbook = new XLWorkbook(stream);
-    //     var worksheet = workbook.Worksheets.First(); // Берём первый лист
-    //     if (worksheet is null)
-    //     {
-    //         logger.LogError("Не удалось получить первый лист");
-    //         throw new DataException("Не удалось получить первый лист");
-    //     }
-    //
-    //     var (nodes, bandWidth) = ParseNodesData(worksheet);
-    //     var adjacencyMatrix = CreateAdjacencyMatrix(nodes);
-    //     var (values, pointers) = PackMatrixScheme4(adjacencyMatrix, bandWidth);
-    //     var unPackedMatrix = UnPackMatrixScheme4(values, pointers, bandWidth);
-    //
-    //     var wb = new XLWorkbook();
-    //
-    //     AddGraphToExcel(wb, nodes);
-    //     AddMatrixToExcel(wb, adjacencyMatrix, bandWidth);
-    //     AddPackingMatrixToExcel(wb, values, pointers);
-    //     AddMatrixToExcel(wb, unPackedMatrix, bandWidth, "Распакованная матрица");
-    //
-    //     using var wbStream = new MemoryStream();
-    //     wb.SaveAs(wbStream);
-    //
-    //     return wbStream.ToArray();
-    // }
     public Result<Guid> ReadAndCalculate(Stream stream)
     {
         using var workbook = new XLWorkbook(stream);
@@ -62,7 +35,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
 
         memoryCache.Set(id.ToString(), packedMatrixResult, new MemoryCacheEntryOptions
         {
-            SlidingExpiration = TimeSpan.FromMinutes(20) // Время жизни продлевается при каждом обращении
+            SlidingExpiration = TimeSpan.FromMinutes(30) // Время жизни продлевается при каждом обращении
         }); // Сохраняем в локальный кэш
 
         return Result<Guid>.Success(id);
@@ -80,15 +53,16 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
             return Result<bool>.Failure("Индекс i или j вышел за границы матрицы");
 
         // Проверяем, находится ли элемент в пределах ширины ленты
-        if (col > row || row - col > matrix.BandWidth)
+        if (Math.Abs(row - col) >= matrix.BandWidth || row == col)
         {
             // Элемент за пределами ширины ленты, пересчитываем матрицу
-            var newBandWidth = Math.Max(matrix.BandWidth, Math.Abs(row - col));
             var adjacencyMatrix = UnPackMatrixScheme4(matrix.Values, matrix.Pointers, matrix.BandWidth);
 
             // Обновляем значение в распакованной матрице
             adjacencyMatrix[row, col] = newValue;
             adjacencyMatrix[col, row] = newValue; // Для симметричной матрицы
+
+            var newBandWidth = CalculateBandwidth(adjacencyMatrix);
 
             // Перепаковываем матрицу с новой шириной ленты
             var newPackedMatrix = PackMatrixScheme4(adjacencyMatrix, newBandWidth);
@@ -107,21 +81,42 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
             return Result<bool>.Success(true);
         }
 
-        // Элемент внутри ширины ленты, обновляем значение
-        var startColumn = Math.Max(0, row - matrix.BandWidth);
-        var offset = col - startColumn; // Смещение столбца от начала текущей строки в ленте
-        var valueIndex = (row == 0) ? 0 : matrix.Pointers[row - 1] + 1 + offset;
-
-        if (valueIndex < 0 || valueIndex >= matrix.Values.Length)
-            return Result<bool>.Failure("Invalid index calculated for the packed matrix.");
-
-        // Изменяем значение в массиве Values
-        matrix.Values[valueIndex] = newValue;
+        if (row > col)
+        {
+            var indexInValues = matrix.Pointers[row] - (row - col);
+            matrix.Values[indexInValues] = newValue;
+        }
+        else
+        {
+            var indexInValues = matrix.Pointers[col] - (col - row);
+            matrix.Values[indexInValues] = newValue;
+        }
 
         // Обновляем кэш
         CreateOrUpdatePackedMatrixInCache(id, matrix);
 
         return Result<bool>.Success(true);
+    }
+
+    private static int CalculateBandwidth(double[,] adjacencyMatrix)
+    {
+        var n = adjacencyMatrix.GetLength(0); // Размер матрицы
+        var maxBandwidth = 0;
+
+        for (var i = 0; i < n; i++)
+        {
+            for (var j = 0; j < n; j++)
+            {
+                if (adjacencyMatrix[i, j] == 0) continue; // Ненулевой элемент
+                var bandwidth = Math.Abs(i - j); // Смещение от диагонали
+                if (bandwidth > maxBandwidth)
+                {
+                    maxBandwidth = bandwidth;
+                }
+            }
+        }
+
+        return maxBandwidth;
     }
 
     private void CreateOrUpdatePackedMatrixInCache(Guid id, PackedMatrix updatedMatrix)
@@ -152,19 +147,21 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
         AddMatrixToExcel(workbook, unPackedMatrix, matrix.BandWidth, "Распакованная матрица");
 
         using var wbStream = new MemoryStream();
-    
+
         // Убедитесь, что сохраняете в формат Excel
         workbook.SaveAs(wbStream);
-    
+
         // Перемещаем позицию потока в начало перед тем, как читать его
         wbStream.Seek(0, SeekOrigin.Begin);
 
         // Проверка, не пуст ли поток (если не пуст, возвращаем файл)
-        return wbStream.Length == 0 ? Result<byte[]>.Failure("Не удалось создать файл Excel.") : Result<byte[]>.Success(wbStream.ToArray());
+        return wbStream.Length == 0
+            ? Result<byte[]>.Failure("Не удалось создать файл Excel.")
+            : Result<byte[]>.Success(wbStream.ToArray());
     }
 
 
-    private static void AddPackingMatrixToExcel(XLWorkbook wb, int[] values, int[] pointers)
+    private static void AddPackingMatrixToExcel(XLWorkbook wb, double[] values, int[] pointers)
     {
         var ws = wb.AddWorksheet("Упакованная матрица");
 
@@ -186,7 +183,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
     }
 
 
-    private static void AddMatrixToExcel(XLWorkbook wb, int[,] matrix, int bandWidth,
+    private static void AddMatrixToExcel(XLWorkbook wb, double[,] matrix, int bandWidth,
         string sheetName = "Матрица смежности")
     {
         var ws = wb.AddWorksheet(sheetName);
@@ -256,17 +253,18 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
         }
     }
 
-    private static (OrderedDictionary<string, List<string>>, int) ParseNodesData(IXLWorksheet worksheet)
+    private static (OrderedDictionary<string, List<(string, double)>>, int) ParseNodesData(IXLWorksheet worksheet)
     {
-        var result = new OrderedDictionary<string, List<string>>();
+        var result = new OrderedDictionary<string, List<(string, double)>>();
         var rows = worksheet.RowsUsed().Count();
-        // Сопоставляем имена с индексами (ключи — строки/столбцы матрицы)
         var maxBandWidth = 0;
+
+        // Сопоставляем имена с индексами (ключи — строки/столбцы матрицы)
         for (var row = 1; row <= rows; row++)
         {
             var node = worksheet.Cell(row, 6).Value.ToString();
             if (string.IsNullOrWhiteSpace(node)) break;
-            result.Add(node, []);
+            result[node] = [];
         }
 
         var keys = result.Keys
@@ -279,53 +277,58 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
             var to = worksheet.Cell(row, 2).Value.ToString();
 
             if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) break;
+            
+            var nodeValue = double.Parse(worksheet.Cell(row, 3).Value.ToString());
 
-            if (result.TryGetValue(from, out var valueFrom)) valueFrom.Add(to);
-
-            else result[from] = [to];
+            if (result.TryGetValue(from, out var valueFrom))
+                valueFrom.Add((to, nodeValue));
+            else
+                result[from] = [(to, nodeValue)];
 
             // Вычисляем ширину ленты (разница индексов)
-            var bandWidth = Math.Abs(keys[from] - keys[to]);
+            if (!keys.TryGetValue(from, out var fromIndex) || !keys.TryGetValue(to, out var toIndex)) continue;
+            var bandWidth = Math.Abs(fromIndex - toIndex);
             maxBandWidth = Math.Max(maxBandWidth, bandWidth);
         }
 
         return (result, maxBandWidth);
     }
 
-
-    private static int[,] CreateAdjacencyMatrix(IDictionary<string, List<string>> graph)
+    private static double[,] CreateAdjacencyMatrix(IDictionary<string, List<(string, double)>> graph)
     {
         // 1. Собираем список всех узлов
-        var nodes = graph.Keys.Union(graph.Values.SelectMany(v => v)).Distinct().ToList();
+        var nodes = graph.Keys.Union(graph.Values.SelectMany(v => v.Select(edge => edge.Item1))).Distinct().ToList();
 
         // Создаем словарь для быстрого доступа к индексам узлов
         var nodeIndex = nodes.Select((node, index) => new { node, index })
             .ToDictionary(x => x.node, x => x.index);
 
         // 2. Инициализируем матрицу
-        var adjacencyMatrix = new int[nodes.Count, nodes.Count];
+        var adjacencyMatrix = new double[nodes.Count, nodes.Count];
 
         // 3. Заполняем матрицу
         foreach (var (fromNode, neighbors) in graph)
         {
             if (!nodeIndex.TryGetValue(fromNode, out var fromIndex)) continue;
 
-            foreach (var toNode in neighbors)
+            foreach (var (toNode, weight) in neighbors)
             {
                 if (!nodeIndex.TryGetValue(toNode, out var toIndex)) continue;
-                // Устанавливаем связь в обе стороны для графа
-                adjacencyMatrix[fromIndex, toIndex] = 1;
-                adjacencyMatrix[toIndex, fromIndex] = 1;
+
+                // Устанавливаем вес в обе стороны для графа
+                adjacencyMatrix[fromIndex, toIndex] = weight;
+                adjacencyMatrix[toIndex, fromIndex] = weight;
             }
         }
 
         return adjacencyMatrix;
     }
 
-    private static (int[] Values, int[] Pointers) PackMatrixScheme4(int[,] adjacencyMatrix, int bandWidth)
+
+    private static (double[] Values, int[] Pointers) PackMatrixScheme4(double[,] adjacencyMatrix, int bandWidth)
     {
         var size = adjacencyMatrix.GetLength(0); // Размер матрицы
-        var values = new List<int>(); // Первый массив: элементы матрицы
+        var values = new List<double>(); // Первый массив: элементы матрицы
         var pointers = new int[size]; // Второй массив: индексы диагональных элементов в Values
 
         for (var i = 0; i < size; i++)
@@ -345,10 +348,10 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
         return (values.ToArray(), pointers);
     }
 
-    private static int[,] UnPackMatrixScheme4(int[] values, int[] pointers, int bandWidth)
+    private static double[,] UnPackMatrixScheme4(double[] values, int[] pointers, int bandWidth)
     {
         var size = pointers.Length; // Размер матрицы (по числу диагональных элементов)
-        var adjacencyMatrix = new int[size, size]; // Инициализация пустой матрицы
+        var adjacencyMatrix = new double[size, size]; // Инициализация пустой матрицы
 
         var valueIndex = 0; // Текущий индекс в массиве values
 

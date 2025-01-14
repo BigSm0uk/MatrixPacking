@@ -3,7 +3,13 @@ import React, {useEffect, useState} from 'react';
 import {createCompletedRoot} from "@/app/Shared/Helpers/FetchHelper";
 import {func} from "ts-interface-checker";
 
-export default function MatrixChangeValue({id, values, pointers, bandWidth}: { id: string, values: number[], pointers: number[], bandWidth: number }) {
+export default function MatrixChangeValue({id, values, pointers, bandWidth, handleMatrixChange}: {
+    id: string,
+    values: number[],
+    pointers: number[],
+    bandWidth: number,
+    handleMatrixChange: () => void
+}) {
     const [row, setRow] = useState('');
     const [col, setCol] = useState('');
     const [newValue, setNewValue] = useState('');
@@ -26,7 +32,6 @@ export default function MatrixChangeValue({id, values, pointers, bandWidth}: { i
         // Если строка больше столбца, то ищем элемент в нижней треугольной части (или диагонали)
         if (nrow > ncol) {
             // Индекс для элементов в верхней треугольной части матрицы
-            const startColumn = Math.max(0, nrow - bandWidth);
             const indexInValues = pointers[nrow] - (nrow - ncol);
 
             return values[indexInValues]; // Возвращаем элемент, если он найден
@@ -34,8 +39,7 @@ export default function MatrixChangeValue({id, values, pointers, bandWidth}: { i
 
         // Если строка меньше или равна столбцу, то ищем элемент в верхней треугольной части
         if (nrow <= ncol) {
-            const startColumn = Math.max(0, ncol - bandWidth); // Определяем диапазон столбцов в пределах ленты
-            const indexInValues = pointers[ncol] - (ncol - nrow - startColumn);
+            const indexInValues = pointers[ncol] - (ncol - nrow);
 
             return values[indexInValues]; // Возвращаем элемент, если он найден
         }
@@ -49,13 +53,18 @@ export default function MatrixChangeValue({id, values, pointers, bandWidth}: { i
         setLoading(true);
         setError('');
 
-        const payload = {row: parseInt(row), col: parseInt(col), newValue: parseInt(newValue)};
+        const payload = { row: row, col: col, newValue: newValue };
 
         try {
-            const response = await fetch(createCompletedRoot(`/MatrixPacking/ChangeMatrixElementInPackedForm/${id}`), {
+            // Создаем строку параметров
+            const queryParams = new URLSearchParams(payload).toString();
+
+            // Добавляем параметры в URL
+            const url = createCompletedRoot(`/MatrixPacking/ChangeMatrixElementInPackedForm/${id}?${queryParams}`);
+
+            // Выполняем POST-запрос (тело не нужно, параметры в query)
+            const response = await fetch(url, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
@@ -66,6 +75,7 @@ export default function MatrixChangeValue({id, values, pointers, bandWidth}: { i
             // Вызов коллбека, чтобы родительский компонент обновил данные
 
             alert('Элемент матрицы успешно изменен!');
+            handleMatrixChange();
         } catch (error: any) {
             setError(error.message || 'Произошла ошибка при изменении элемента.');
         } finally {
@@ -77,34 +87,49 @@ export default function MatrixChangeValue({id, values, pointers, bandWidth}: { i
         <div className="p-6">
             <h2 className="text-lg font-semibold text-primary mb-4">Изменить элемент матрицы</h2>
             <form onSubmit={handleSubmit}>
-                <div className="flex gap-4 mb-4">
-                    <input
-                        type="number"
-                        placeholder="Строка"
-                        value={row}
-                        onChange={(e) => setRow(e.target.value)}
-                        className="input input-sm input-bordered w-full max-w-xs"
-                    />
-                    <input
-                        type="number"
-                        placeholder="Столбец"
-                        value={col}
-                        onChange={(e) => setCol(e.target.value)}
-                        className="input input-sm  input-bordered w-full max-w-xs"
-                    />
-                    <input
-                        type="number"
-                        placeholder="Новое значение"
-                        value={newValue}
-                        onChange={(e) => setNewValue(e.target.value)}
-                        className="input input-sm input-bordered w-full max-w-xs"
-                    />
+                <div className="flex flex-wrap items-end gap-4 mb-4">
+                    <label className="form-control w-full max-w-xs">
+                        <div className="label">
+                            <span className="label-text">Номер строки</span>
+                        </div>
+                        <input
+                            type="number"
+                            placeholder="Строка"
+                            value={row}
+                            onChange={(e) => setRow(e.target.value)}
+                            className="input input-sm input-bordered w-full max-w-xs"
+                        />
+                    </label>
+                    <label className="form-control w-full max-w-xs">
+                        <div className="label">
+                            <span className="label-text">Номер столбца</span>
+                        </div>
+                        <input
+                            type="number"
+                            placeholder="Столбец"
+                            value={col}
+                            onChange={(e) => setCol(e.target.value)}
+                            className="input input-sm  input-bordered w-full max-w-xs"
+                        />
+                    </label>
+                    <label className="form-control w-full max-w-xs">
+                        <div className="label">
+                            <span className="label-text">Значение в ячейке</span>
+                        </div>
+                        <input
+                            type="number"
+                            placeholder="Новое значение"
+                            value={newValue}
+                            onChange={(e) => setNewValue(e.target.value)}
+                            className="input input-sm input-bordered w-full max-w-xs"
+                        />
+                    </label>
+                        <button type="submit" className="btn btn-sm btn-primary" disabled={loading}>
+                            {loading ? 'Обновление...' : 'Изменить элемент'}
+                        </button>
                 </div>
-                <button type="submit" className="btn btn-sm btn-primary w-full" disabled={loading}>
-                    {loading ? 'Обновление...' : 'Изменить элемент'}
-                </button>
             </form>
             {error && <p className="text-red-500 mt-4">{error}</p>}
         </div>
-    );
+);
 }

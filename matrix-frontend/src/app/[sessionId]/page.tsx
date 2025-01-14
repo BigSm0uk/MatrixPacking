@@ -18,27 +18,25 @@ export default function Page({params}: { params: Promise<{ sessionId: string }> 
 
         fetchSessionId();
     }, [params]);
+    const fetchMatrixData = async () => {
+        try {
+            const response = await fetch(createCompletedRoot(`/MatrixPacking/GetResultMatrix/${sessionId}`));
 
+            if (!response.ok) {
+                const errorText = await response.text();
+                setError(`Ошибка загрузки данных: ${response.status} - ${errorText}`);
+                return;
+            }
+
+            const data = await response.json();
+            setPackedMatrix(data);
+        } catch (err) {
+            setError('Ошибка при загрузке данных');
+            console.error(err);
+        }
+    };
     useEffect(() => {
         if (sessionId) {
-            const fetchMatrixData = async () => {
-                try {
-                    const response = await fetch(createCompletedRoot(`/MatrixPacking/GetResultMatrix/${sessionId}`));
-
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        setError(`Ошибка загрузки данных: ${response.status} - ${errorText}`);
-                        return;
-                    }
-
-                    const data = await response.json();
-                    setPackedMatrix(data);
-                } catch (err) {
-                    setError('Ошибка при загрузке данных');
-                    console.error(err);
-                }
-            };
-
             fetchMatrixData();
         }
     }, [sessionId]);
@@ -68,12 +66,17 @@ export default function Page({params}: { params: Promise<{ sessionId: string }> 
             console.error("Ошибка запроса:", error);
         }
     }
+    function handleMatrixChange(){
+        fetchMatrixData();
+    }
     return (
         <div className="p-6">
             <div className="card shadow-lg bg-base-200">
                 <div className="card-body">
-                    <h1 className="card-title text-primary text-2xl">Результаты сессии <button className="btn btn-sm btn-link w-20 text-primary" onClick={handleFileLoad}>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                    <h1 className="card-title text-primary text-2xl">Результаты сессии <button
+                        className="btn btn-sm btn-link w-20 text-primary" onClick={handleFileLoad}>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
+                             fill="currentColor">
                             <path
                                 d="m15,7V0H5c-1.657,0-3,1.343-3,3v21h20V7h-7Zm-1.594,12.417c-.388.388-.897.581-1.406.581s-1.019-.193-1.406-.581l-3.299-3.299,1.414-1.414,2.291,2.291v-5.997h2v6.008l2.291-2.302,1.414,1.414-3.299,3.299Zm8.008-14.417h-4.414V.586l4.414,4.414Z"/>
                         </svg>
@@ -83,12 +86,13 @@ export default function Page({params}: { params: Promise<{ sessionId: string }> 
                     </p>
 
                     <div className="divider"></div>
-                    <MatrixChangeValue bandWidth={packedMatrix.bandWidth} values={packedMatrix.values} pointers={packedMatrix.pointers} id={sessionId!}></MatrixChangeValue>
+                    <MatrixChangeValue handleMatrixChange={handleMatrixChange} bandWidth={packedMatrix.bandWidth} values={packedMatrix.values}
+                                       pointers={packedMatrix.pointers} id={sessionId!}></MatrixChangeValue>
                     <div className="divider"></div>
                     {/* Секция статистики */}
                     <div className="stats stats-vertical lg:stats-horizontal shadow mb-4">
                         <div className="stat place-items-center">
-                        <div className="stat-title">Ширина ленты</div>
+                            <div className="stat-title">Ширина ленты</div>
                             <div className="stat-value text-primary">{packedMatrix.bandWidth}</div>
                             <div className="stat-desc">Количество элементов</div>
                         </div>
@@ -109,7 +113,6 @@ export default function Page({params}: { params: Promise<{ sessionId: string }> 
                         <ClientMatrix title="Значения упакованной матрицы"
                                       data={packedMatrix.values}/>
                         <ClientMatrix title="Указатели матрицы" data={packedMatrix.pointers}/>
-                        <ClientMatrix title="Индексы единиц матрицы" data={packedMatrix.values.map((v, index)=> v===0 ? -1:index).filter(v=>v!==-1)}/>
                     </div>
                 </div>
             </div>
