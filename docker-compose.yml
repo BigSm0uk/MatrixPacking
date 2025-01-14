@@ -1,0 +1,25 @@
+﻿services:
+  matrix-backend:
+    image: bigsm0uk/matrix-backend:latest
+    build:
+      context: ./matrix-backend/
+      dockerfile: ./Dockerfile
+    container_name: matrix-backend
+    ports:
+      - "5000:5000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.matrix-backend.rule=Host(`mafinity.ru`) && PathPrefix(`/matrix-api`)"
+      - "traefik.http.routers.matrix-backend.entrypoints=https"
+      - "traefik.http.routers.matrix-backend.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.matrix-backend.tls=true"
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_URLS=http://+:5000;
+    networks:
+      - default
+
+networks:
+  default:
+    name: traefik_wilo_admin
+    external: true

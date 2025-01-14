@@ -7,6 +7,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddSwaggerGen();
 builder.Services.AddScoped<MatrixPackingService>();
 builder.Services.AddMemoryCache();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -23,10 +24,11 @@ if (app.Environment.IsDevelopment())
 }
 else
     app.UseCors(x =>
-        x.WithOrigins("https://mafinity.ru")
+        x.WithOrigins("https://mafinity.ru", "http://localhost:3000")
             .AllowAnyMethod()
             .AllowAnyHeader()
     );
+app.MapHealthChecks("/health");
 
 app.UseAuthorization();
 
