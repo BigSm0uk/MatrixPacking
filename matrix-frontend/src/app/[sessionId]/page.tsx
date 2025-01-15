@@ -86,7 +86,7 @@ export default function Page({params}: { params: Promise<{ sessionId: string }> 
                     </p>
 
                     <div className="divider"></div>
-                    <MatrixChangeValue handleMatrixChange={handleMatrixChange} bandWidth={packedMatrix.bandWidth} values={packedMatrix.values}
+                    <MatrixChangeValue handleMatrixChangeAction={handleMatrixChange} bandWidth={packedMatrix.bandWidth} values={packedMatrix.values}
                                        pointers={packedMatrix.pointers} id={sessionId!}></MatrixChangeValue>
                     <div className="divider"></div>
                     {/* Секция статистики */}
