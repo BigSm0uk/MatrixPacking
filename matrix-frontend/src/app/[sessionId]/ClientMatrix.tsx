@@ -15,7 +15,7 @@ export default function ClientMatrix({ title, data }: { title: string; data: num
             <div className="flex justify-between items-center">
                 <h2 className="text-lg font-bold">{title}</h2>
                 <button className="btn btn-sm btn-primary" onClick={handleCopy}>
-                    <Image src="/copy.png" width={20} height={20} alt="Копировать"></Image>
+                    <Image src="/matrix/copy.png" width={20} height={20} alt="Копировать"></Image>
                 </button>
             </div>
             <div

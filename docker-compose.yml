@@ -3,7 +3,6 @@
     image: bigsm0uk/matrix-backend:latest
     build:
       context: ./matrix-backend/
-      dockerfile: ./Dockerfile
     container_name: matrix-backend
     ports:
       - "5000:5000"
@@ -16,6 +15,25 @@
     restart: unless-stopped
     environment:
       - ASPNETCORE_URLS=http://+:5000;
+    networks:
+      - default
+  matrix-frontend:
+    build:
+      context: ./matrix-frontend
+    image: bigsm0uk/matrix-frontend:latest
+    container_name: matrix-frontend
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.matrix-frontend.rule=Host(`mafinity.ru`) && PathPrefix(`/matrix`)"
+      - "traefik.http.routers.matrix-frontend.entrypoints=https"
+      - "traefik.http.routers.matrix-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.matrix-frontend.tls=true"
+      - "traefik.http.services.matrix-frontend.loadbalancer.server.port=3125"
+    restart: unless-stopped
     networks:
       - default
 

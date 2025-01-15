@@ -3,6 +3,7 @@ import React from "react";
 import {Controller, useForm} from "react-hook-form";
 import {createCompletedRoot} from "@/app/Shared/Helpers/FetchHelper";
 import {useRouter} from "next/navigation";
+import getConfig from "next/config";
 
 export default function Home() {
     const router = useRouter()
@@ -18,7 +19,7 @@ export default function Home() {
         if (data.useTestFile) {
             // Загружаем файл из папки public
             try {
-                const response = await fetch("/Данные_приложение_3.xlsx"); // Укажите путь к вашему тестовому файлу
+                const response = await fetch("/matrix/Данные_приложение_3.xlsx"); // Укажите путь к вашему тестовому файлу
                 const blob = await response.blob();
                 fileToUpload = new File([blob], "Данные_приложение_3.xlsx", {
                     type: blob.type,
@@ -55,7 +56,7 @@ export default function Home() {
                 if (!result?.sessionId) {
                     alert("Ответ не содержит sessionId");
                 }
-                router.push(result.sessionId);
+                router.push(`${process.env.NEXT_PUBLIC_API_BASE_PATH}/${result.sessionId}`);
                 
             } catch (error : any) {
                 console.error("Произошла ошибка:", error.message);
@@ -78,7 +79,7 @@ export default function Home() {
                     </p>
                     <p className="mb-6">
                         Пример файла можно скачать
-                        <a className="link link-primary ml-1" href="/Данные_приложение_3.xlsx">
+                        <a className="link link-primary ml-1" href="/matrix/Данные_приложение_3.xlsx">
                             по ссылке
                         </a>
                     </p>
