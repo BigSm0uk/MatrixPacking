@@ -46,8 +46,7 @@ export default function MatrixChangeValue({
             return 0; // Элемент за пределами ленты
         }
 
-        const startColumn = Math.max(0, nrow - bandWidth);
-        const indexInValues = pointers[nrow] + (ncol - startColumn);
+        const indexInValues = pointers[nrow] - (nrow - ncol);
 
         return values[indexInValues] || 0; // Возвращаем элемент, если он найден
     }

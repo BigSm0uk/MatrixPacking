@@ -24,7 +24,7 @@ if (app.Environment.IsDevelopment())
 }
 else
     app.UseCors(x =>
-        x.WithOrigins("https://mafinity.ru", "http://localhost:3000")
+        x.WithOrigins("https://mafinity.ru")
             .AllowAnyMethod()
             .AllowAnyHeader()
     );
