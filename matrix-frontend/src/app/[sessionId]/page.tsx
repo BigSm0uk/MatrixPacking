@@ -86,14 +86,14 @@ export default function Page({params}: { params: Promise<{ sessionId: string }> 
                     </p>
 
                     <div className="divider"></div>
-                    <MatrixChangeValue handleMatrixChangeAction={handleMatrixChange} bandWidth={packedMatrix.bandWidth} values={packedMatrix.values}
+                    <MatrixChangeValue handleMatrixChangeAction={handleMatrixChange} bandWidth={packedMatrix.maxBandWidth} values={packedMatrix.values}
                                        pointers={packedMatrix.pointers} id={sessionId!}></MatrixChangeValue>
                     <div className="divider"></div>
                     {/* Секция статистики */}
                     <div className="stats stats-vertical lg:stats-horizontal shadow mb-4">
                         <div className="stat place-items-center">
-                            <div className="stat-title">Ширина ленты</div>
-                            <div className="stat-value text-primary">{packedMatrix.bandWidth}</div>
+                            <div className="stat-title">Максимальная ширина ленты</div>
+                            <div className="stat-value text-primary">{packedMatrix.maxBandWidth}</div>
                             <div className="stat-desc">Количество элементов</div>
                         </div>
                         <div className="stat place-items-center">

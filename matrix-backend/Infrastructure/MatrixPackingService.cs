@@ -18,9 +18,10 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
             return Result<Guid>.Failure("Не удалось получить первый лист");
         }
 
-        var (nodes, bandWidth) = ParseNodesData(worksheet);
+        var nodes = ParseNodesData(worksheet);
         var adjacencyMatrix = CreateAdjacencyMatrix(nodes);
-        var (values, pointers) = PackMatrixScheme4(adjacencyMatrix, bandWidth);
+        var bandWidths = CalculateBandWidths(adjacencyMatrix);
+        var (values, pointers) = PackMatrixScheme4(adjacencyMatrix, bandWidths);
 
         var id = Guid.NewGuid();
 
@@ -28,7 +29,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
         {
             Id = id,
             Pointers = pointers,
-            BandWidth = bandWidth,
+            MaxBandWidth = bandWidths.Max(),
             Values = values,
             TotalMatrixSize = adjacencyMatrix.Length
         };
@@ -50,73 +51,146 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
 
         // Проверяем корректность входных данных
         if (row < 0 || row >= matrix.TotalMatrixSize || col < 0 || col >= matrix.TotalMatrixSize)
-            return Result<bool>.Failure("Индекс i или j вышел за границы матрицы");
+            return Result<bool>.Failure("Индекс строки или столбца вышел за границы матрицы.");
 
-        // Проверяем, находится ли элемент в пределах ширины ленты
-        if (Math.Abs(row - col) >= matrix.BandWidth || row == col)
+        // Для симметричной матрицы приводим индексы к стандартной форме (row >= col)
+        if (row < col) (row, col) = (col, row);
+
+        // Если работаем с первой строкой (диагональ)
+        if (row == 0 && col == 0)
         {
-            // Элемент за пределами ширины ленты, пересчитываем матрицу
-            var adjacencyMatrix = UnPackMatrixScheme4(matrix.Values, matrix.Pointers, matrix.BandWidth);
-
-            // Обновляем значение в распакованной матрице
-            adjacencyMatrix[row, col] = newValue;
-            adjacencyMatrix[col, row] = newValue; // Для симметричной матрицы
-
-            var newBandWidth = CalculateBandwidth(adjacencyMatrix);
-
-            // Перепаковываем матрицу с новой шириной ленты
-            var newPackedMatrix = PackMatrixScheme4(adjacencyMatrix, newBandWidth);
-
-            // Сохраняем новую матрицу в кэш
-            var updatedMatrix = new PackedMatrix
-            {
-                Id = matrix.Id,
-                Values = newPackedMatrix.Values,
-                Pointers = newPackedMatrix.Pointers,
-                TotalMatrixSize = matrix.TotalMatrixSize,
-                BandWidth = newBandWidth
-            };
-            CreateOrUpdatePackedMatrixInCache(id, updatedMatrix);
-
+            matrix.Values[0] = newValue; // Диагональ всегда находится в первом элементе Values
+            CreateOrUpdatePackedMatrixInCache(id, matrix);
             return Result<bool>.Success(true);
         }
 
-        if (row > col)
+        // Определяем текущую локальную ширину ленты для строки
+        var bandWidth = matrix.Pointers[row] - matrix.Pointers[row - 1] - 1;
+
+        if (col >= row - bandWidth)
         {
-            var indexInValues = matrix.Pointers[row] - (row - col);
-            matrix.Values[indexInValues] = newValue;
+            // Элемент находится в пределах ленты или на границе
+            var pos = matrix.Pointers[row] - (row - col);
+
+            if (col == row - bandWidth && newValue == 0)
+            {
+                // Если значение на границе ленты становится нулевым, пересчитываем локальную ширину
+                var newBandWidth = RecalculateLocalBandWidth(matrix, row);
+                var difference = newBandWidth - bandWidth;
+
+                if (difference < 0) // Если локальная ширина уменьшилась
+                {
+                    // Удаляем лишние элементы из Values
+                    var startIndex = matrix.Pointers[row - 1] + newBandWidth + 1;
+                    var endIndex = matrix.Pointers[row];
+                    var valuesList = matrix.Values.ToList();
+                    valuesList.RemoveRange(startIndex, endIndex - startIndex);
+                    matrix.Values = valuesList.ToArray();
+
+                    // Корректируем указатели
+                    for (var i = row; i < matrix.Pointers.Length; i++)
+                    {
+                        matrix.Pointers[i] += difference;
+                    }
+                }
+            }
+            else
+            {
+                // Обновляем значение
+                matrix.Values[pos] = newValue;
+            }
         }
-        else
+        else if (newValue != 0)
         {
-            var indexInValues = matrix.Pointers[col] - (col - row);
-            matrix.Values[indexInValues] = newValue;
+            // Если элемент за границей текущей ленты и новое значение не 0
+            ExpandBandWidth(matrix, row, col, newValue);
         }
 
-        // Обновляем кэш
+        // Сохраняем изменённую матрицу
         CreateOrUpdatePackedMatrixInCache(id, matrix);
-
         return Result<bool>.Success(true);
     }
 
-    private static int CalculateBandwidth(double[,] adjacencyMatrix)
+    /// <summary>
+    /// Пересчитывает локальную ширину ленты для строки после изменения значений.
+    /// </summary>
+    private static int RecalculateLocalBandWidth(PackedMatrix matrix, int row)
+    {
+        var startIndex = matrix.Pointers[row - 1] + 2; // Начало ленты
+        var endIndex = matrix.Pointers[row]; // Конец ленты
+        for (var i = startIndex; i <= endIndex; i++)
+        {
+            if (matrix.Values[i] != 0)
+                return endIndex - i;
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Расширяет ленту для строки, добавляя новый элемент за её границей, а также все промежуточные нулевые элементы.
+    /// </summary>
+    private static void ExpandBandWidth(PackedMatrix matrix, int row, int col, int newValue)
+    {
+        // Вычисляем новую ширину ленты
+        var newBandWidth = row - col;
+
+        // Текущая ширина ленты
+        var currentBandWidth = matrix.Pointers[row] - matrix.Pointers[row - 1] - 1;
+
+        // Разница между новой и текущей шириной
+        var widthDifference = newBandWidth - currentBandWidth;
+
+        // Позиция вставки нового элемента
+        var insertPosition = matrix.Pointers[row - 1] + 1;
+
+        // Создаём список значений и вставляем новый элемент
+        var valuesList = matrix.Values.ToList();
+        valuesList.Insert(insertPosition, newValue);
+
+        // Вставляем промежуточные нули (widthDifference - 1, так как один элемент уже вставили)
+        valuesList.InsertRange(insertPosition + 1, Enumerable.Repeat(0.0, widthDifference - 1));
+
+        // Обновляем массив значений
+        matrix.Values = valuesList.ToArray();
+
+        // Корректируем указатели всех строк, начиная с текущей
+        for (var i = row; i < matrix.Pointers.Length; i++)
+        {
+            matrix.Pointers[i] += widthDifference; // Увеличиваем указатель на разницу ширин
+        }
+    }
+
+    private static int[] CalculateBandWidths(double[,] adjacencyMatrix)
     {
         var n = adjacencyMatrix.GetLength(0); // Размер матрицы
-        var maxBandwidth = 0;
+        var bandwidths = new int[adjacencyMatrix.GetLength(0)];
 
         for (var i = 0; i < n; i++)
         {
-            for (var j = 0; j < n; j++)
+            for (var j = 0; j <= i; j++)
             {
-                if (adjacencyMatrix[i, j] == 0) continue; // Ненулевой элемент
                 var bandwidth = Math.Abs(i - j); // Смещение от диагонали
-                if (bandwidth > maxBandwidth)
-                {
-                    maxBandwidth = bandwidth;
-                }
+                bandwidths[i] = bandwidth;
+                if (adjacencyMatrix[i, j] == 0) continue;
+                bandwidths[i] = bandwidth;
+                break;
             }
         }
 
-        return maxBandwidth;
+        return bandwidths;
+    }
+
+    private static int[] CalculateBandWidths(int[] pointers)
+    {
+        var n = pointers.Length; // Размер матрицы
+        var bandwidths = new int[pointers.Length];
+        bandwidths[0] = 0;
+        for (var i = 1; i < n; i++)
+        {
+            bandwidths[i] = pointers[i] - pointers[i - 1] - 1;
+        }
+
+        return bandwidths;
     }
 
     private void CreateOrUpdatePackedMatrixInCache(Guid id, PackedMatrix updatedMatrix)
@@ -141,10 +215,11 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
             return Result<byte[]>.Failure("Нет сессии с таким id");
 
         using var workbook = new XLWorkbook();
-        var unPackedMatrix = UnPackMatrixScheme4(matrix!.Values, matrix.Pointers, matrix.BandWidth);
+        var bandWidths = CalculateBandWidths(matrix!.Pointers);
+        var unPackedMatrix = UnPackMatrixScheme4(matrix.Values, matrix.Pointers, bandWidths);
 
         AddPackingMatrixToExcel(workbook, matrix.Values, matrix.Pointers);
-        AddMatrixToExcel(workbook, unPackedMatrix, matrix.BandWidth, "Распакованная матрица");
+        AddMatrixToExcel(workbook, unPackedMatrix, bandWidths, "Распакованная матрица");
 
         using var wbStream = new MemoryStream();
 
@@ -183,7 +258,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
     }
 
 
-    private static void AddMatrixToExcel(XLWorkbook wb, double[,] matrix, int bandWidth,
+    private static void AddMatrixToExcel(XLWorkbook wb, double[,] matrix, int[] bandWidths,
         string sheetName = "Матрица смежности")
     {
         var ws = wb.AddWorksheet(sheetName);
@@ -206,58 +281,24 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
                     cell.Style.Fill.BackgroundColor = XLColor.LightBlue;
                 }
                 // Установка стиля фона для элементов за пределами ширины ленты
-                else if (Math.Abs(i - j) > bandWidth)
+                else if ((j > i && j - i > bandWidths[j]) || (i > j && i - j > bandWidths[i]))
                 {
-                    cell.Style.Fill.BackgroundColor = XLColor.DarkGreen;
+                    cell.Style.Fill.BackgroundColor = XLColor.LightGreen;
                 }
 
                 // Установка стиля фона для всех ненулевых элементов
                 if (matrix[i, j] != 0)
                 {
-                    cell.Style.Fill.BackgroundColor = XLColor.Red;
+                    cell.Style.Fill.BackgroundColor = XLColor.CoralRed;
                 }
             }
         }
     }
 
-
-    private static void AddGraphToExcel(XLWorkbook workbook, IDictionary<string, List<string>> graph)
-    {
-        // Создаем новый лист в Excel
-        var worksheet = workbook.AddWorksheet("Исходные данные");
-
-        // Заполняем заголовки
-        worksheet.Cell(1, 1).Value = "Узел";
-        worksheet.Cell(1, 2).Value = "Связи"; // Мы будем объединять все связи в одну колонку
-
-        // Находим максимальное количество соседей
-        var maxNeighbors = graph.Values.Max(neighbors => neighbors.Count) + 1;
-        worksheet.Range(1, 2, 1, maxNeighbors).Merge();
-        worksheet.Range(1, 2, 1, maxNeighbors).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-        worksheet.Range(1, 2, 1, maxNeighbors).Style.Border.SetOutsideBorder(XLBorderStyleValues.Thick);
-        worksheet.Cell(1, 1).Style.Border.SetOutsideBorder(XLBorderStyleValues.Thick);
-        // Заполняем данные
-        var row = 2; // Начинаем с 2-й строки
-        foreach (var node in graph)
-        {
-            if (node.Value.Count == 0) continue;
-            worksheet.Cell(row, 1).Value = node.Key; // Имя узла
-
-            var col = 2;
-            foreach (var value in node.Value)
-            {
-                worksheet.Cell(row, col++).Value = value;
-            }
-
-            row++;
-        }
-    }
-
-    private static (OrderedDictionary<string, List<(string, double)>>, int) ParseNodesData(IXLWorksheet worksheet)
+    private static OrderedDictionary<string, List<(string, double)>> ParseNodesData(IXLWorksheet worksheet)
     {
         var result = new OrderedDictionary<string, List<(string, double)>>();
         var rows = worksheet.RowsUsed().Count();
-        var maxBandWidth = 0;
 
         // Сопоставляем имена с индексами (ключи — строки/столбцы матрицы)
         for (var row = 1; row <= rows; row++)
@@ -277,21 +318,16 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
             var to = worksheet.Cell(row, 2).Value.ToString();
 
             if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) break;
-            
+
             var nodeValue = double.Parse(worksheet.Cell(row, 3).Value.ToString());
 
             if (result.TryGetValue(from, out var valueFrom))
                 valueFrom.Add((to, nodeValue));
             else
                 result[from] = [(to, nodeValue)];
-
-            // Вычисляем ширину ленты (разница индексов)
-            if (!keys.TryGetValue(from, out var fromIndex) || !keys.TryGetValue(to, out var toIndex)) continue;
-            var bandWidth = Math.Abs(fromIndex - toIndex);
-            maxBandWidth = Math.Max(maxBandWidth, bandWidth);
         }
 
-        return (result, maxBandWidth);
+        return result;
     }
 
     private static double[,] CreateAdjacencyMatrix(IDictionary<string, List<(string, double)>> graph)
@@ -325,30 +361,26 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
     }
 
 
-    private static (double[] Values, int[] Pointers) PackMatrixScheme4(double[,] adjacencyMatrix, int bandWidth)
+    private static (double[] Values, int[] Pointers) PackMatrixScheme4(double[,] adjacencyMatrix, int[] bandWidths)
     {
         var size = adjacencyMatrix.GetLength(0); // Размер матрицы
         var values = new List<double>(); // Первый массив: элементы матрицы
         var pointers = new int[size]; // Второй массив: индексы диагональных элементов в Values
-
         for (var i = 0; i < size; i++)
         {
-            // Ограничиваем диапазон столбцов шириной ленты
-            var startColumn = Math.Max(0, i - bandWidth); // Начало - максимум между 0 и (i - ширина ленты)
-
+            var startColumn = i - bandWidths[i];
             for (var j = startColumn; j <= i; j++)
             {
-                values.Add(adjacencyMatrix[i, j]); // Добавляем элемент в Values
+                values.Add(adjacencyMatrix[i, j]);
             }
 
-            // Индекс диагонального элемента
             pointers[i] = values.Count - 1;
         }
 
         return (values.ToArray(), pointers);
     }
 
-    private static double[,] UnPackMatrixScheme4(double[] values, int[] pointers, int bandWidth)
+    private static double[,] UnPackMatrixScheme4(double[] values, int[] pointers, int[] bandWidths)
     {
         var size = pointers.Length; // Размер матрицы (по числу диагональных элементов)
         var adjacencyMatrix = new double[size, size]; // Инициализация пустой матрицы
@@ -358,8 +390,7 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
         for (var i = 0; i < size; i++)
         {
             // Определяем диапазон столбцов, которые входят в ширину ленты
-            var startColumn = Math.Max(0, i - bandWidth); // Левый край ленты
-
+            var startColumn = Math.Max(0, i - bandWidths[i]); // Левый край ленты
             for (var j = startColumn; j <= i; j++)
             {
                 // Заполняем элемент из values

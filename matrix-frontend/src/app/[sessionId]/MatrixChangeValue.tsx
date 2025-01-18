@@ -39,12 +39,20 @@ export default function MatrixChangeValue({
     }, [row, col, setValue]);
 
     function findElementInPackedMatrix(): number {
-        const nrow = parseInt(row || '0');
-        const ncol = parseInt(col || '0');
+        let nrow = parseInt(row || '0');
+        let ncol = parseInt(col || '0');
 
-        if (Math.abs(nrow - ncol) > bandWidth) {
+        if (Math.abs(nrow - ncol) > bandWidth || nrow <0 || ncol < 0) {
             return 0; // Элемент за пределами ленты
         }
+        if(ncol > nrow) {
+            let temp = nrow;
+            nrow = ncol;
+            ncol = temp;
+        }
+        
+        const localBandWidth = pointers[nrow]- pointers[nrow -1] -1;
+        if(localBandWidth === 0) return 0;
 
         const indexInValues = pointers[nrow] - (nrow - ncol);
 
@@ -84,7 +92,7 @@ export default function MatrixChangeValue({
                     <Controller
                         name="row"
                         control={control}
-                        rules={{required: 'Введите номер строки', max: {value: pointers.length, message: 'Значение должно быть в пределах индексов матрицы '}}}
+                        rules={{required: 'Введите номер строки', min: {value: 0, message: 'Значение должно быть в пределах индексов матрицы'}, max: {value: pointers.length -1, message: 'Значение должно быть в пределах индексов матрицы '}}}
                         render={({field}) => (
                             <label className="form-control h-32 w-full max-w-xs">
                                 <div className="label">
@@ -103,7 +111,7 @@ export default function MatrixChangeValue({
                     <Controller
                         name="col"
                         control={control}
-                        rules={{required: 'Введите номер столбца', max: {value: pointers.length, message: 'Значение должно быть в пределах индексов матрицы '}}}
+                        rules={{required: 'Введите номер столбца',min: {value: 0, message: 'Значение должно быть в пределах индексов матрицы'}, max: {value: pointers.length -1, message: 'Значение должно быть в пределах индексов матрицы '}}}
                         render={({field}) => (
                             <label className="form-control h-32 w-full max-w-xs">
                                 <div className="label">

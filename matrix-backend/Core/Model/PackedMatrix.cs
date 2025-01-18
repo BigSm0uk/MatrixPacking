@@ -4,9 +4,9 @@ namespace Core.Model;
 
 public class PackedMatrix : BaseEntity
 {
-    public double[] Values { get; init; } = [];
-    public int[] Pointers { get; init; } = [];
+    public double[] Values { get; set; } = [];
+    public int[] Pointers { get; set; } = [];
     public int PackedSize => Values.Length + Pointers.Length;
-    public int TotalMatrixSize { get; init; }
-    public int BandWidth { get; init; }
+    public int TotalMatrixSize { get; set; }
+    public int MaxBandWidth { get; set; }
 }
