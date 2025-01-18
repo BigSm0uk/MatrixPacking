@@ -308,10 +308,6 @@ public class MatrixPackingService(ILogger<MatrixPackingService> logger, IMemoryC
             result[node] = [];
         }
 
-        var keys = result.Keys
-            .Select((node, index) => new { node, index })
-            .ToDictionary(x => x.node, x => x.index);
-
         for (var row = 1; row <= rows; row++)
         {
             var from = worksheet.Cell(row, 1).Value.ToString();
